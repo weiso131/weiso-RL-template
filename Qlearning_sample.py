@@ -1,14 +1,10 @@
-import numpy as np
 import math
 
 import gym
 
 from src.Q_learing import Q_learning
 
-# discreteSpace = [[-1, 0, 1], [-1, 0, 1], [-1, 0, 1], [-1, 0, 1]]
-# state = [-1.1, -1, 0.1, 2]
 
-# print(makeDiscreteState(discreteSpace, state))#(0, 1, 2, 3)
 def rewardFunc(observation):
     angle = abs(observation[2])
     position = abs(observation[0])

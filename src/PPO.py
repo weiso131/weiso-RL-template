@@ -26,16 +26,11 @@ class PPO():
 
         return action
 
-    
     def train(self, batch_size=64, epochs=10, gamma=0.9, lr=1e-3, episode=0.2, lmbda=0.95):
         # 檢查CUDA是否可用並設定device
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # 載入數據到DataLoader
-        # 數據結構 [oldstate, state, action, reward]
-        
-        
-
+        # 將網路傳入可用的運行裝置        
         self.PolicyNetwork.to(device, dtype=torch.float32)
         self.ValueNetwork.to(device, dtype=torch.float32)
         # 定義優化器
@@ -50,10 +45,8 @@ class PPO():
         Reward = torch.tensor(self.ExperienceHistory['reward']).view(-1, 1)
         Done = torch.tensor(self.ExperienceHistory['done']).view(-1, 1)
 
-        
-        #加入done
 
-        #計算delta, targetValue, old_predict
+        #在開始訓練前，先計算delta, targetValue, old_predict
         TargetDataset = TensorDataset(State, NextState, Reward, Action, Done)
         TargetLoader = DataLoader(TargetDataset, batch_size=batch_size, shuffle=False)#確保順序一致
 
@@ -63,8 +56,6 @@ class PPO():
 
         self.ValueNetwork.eval()
         self.PolicyNetwork.eval()
-
-        test = True
 
         for state, nextState, reward, action, done in TargetLoader:
             state = state.to(device, dtype=torch.float32)
@@ -76,20 +67,18 @@ class PPO():
             #計算delta, targetValue 
             V_target = reward + gamma * self.ValueNetwork(nextState).detach() * (1 - done)
             
-            d = V_target - self.ValueNetwork(state).detach()
-
-            
+            delta = V_target - self.ValueNetwork(state).detach()
 
             #計算old_predict
             old = torch.log(self.PolicyNetwork(state).gather(1, action)).detach()
 
 
             V_target = V_target.to(device="cpu", dtype=torch.float32)
-            d = d.to(device="cpu", dtype=torch.float32)
+            delta = delta.to(device="cpu", dtype=torch.float32)
             old = old.to(device="cpu", dtype=torch.float32)
 
             td_target.extend(list(V_target))
-            td_delta.extend(list(d))
+            td_delta.extend(list(delta))
             old_predict.extend(list(old))
 
 
@@ -97,17 +86,19 @@ class PPO():
 
         advantageList = []
         ad = 0
-        for d in td_delta[::-1]:
-            ad = gamma * lmbda * ad + d
-            advantageList.append(ad)
-
+        for i in range(len(td_delta) - 1, -1, -1):
+            delta = td_delta[i]
+            done = self.ExperienceHistory['done'][i]
+            ad = gamma * lmbda * ad * (1 - done) + delta #(1 -done)確保後面場次的一切與現在無關
+            advantageList.append(ad) 
         advantageList.reverse()
+
+
 
         dataset = TensorDataset(State, NextState, Action, Reward, torch.tensor(td_target).view(-1, 1),
                                  torch.tensor(advantageList).view(-1, 1), torch.tensor(old_predict).view(-1, 1))
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-        # 訓練模式
         self.ValueNetwork.train()
         self.PolicyNetwork.train()
 
@@ -118,8 +109,8 @@ class PPO():
             for state, nextState, action, reward, V_target, advantage, old in dataloader:
                 state = state.to(device, dtype=torch.float32)
                 state = state.to(device, dtype=torch.float32)
-                action = action.to(device, dtype=torch.int64)  # 確保行動是長整型
-                reward = reward.to(device, dtype=torch.float32)  # 確保獎勵是浮點數
+                action = action.to(device, dtype=torch.int64)  
+                reward = reward.to(device, dtype=torch.float32)  
                 V_target = V_target.to(device, dtype=torch.float32)
                 advantage = advantage.to(device, dtype=torch.float32)
                 old = old.to(device, dtype=torch.float32)
@@ -143,7 +134,7 @@ class PPO():
 
                 totalPolicyLoss += policy_loss.item()
                 totalValueLoss += value_loss.item()
-
+        
         self.PolicyNetwork.to(device="cpu", dtype=torch.float32)
         self.ValueNetwork.to(device="cpu", dtype=torch.float32)
         self.ExperienceHistory['oldstate'] = []
